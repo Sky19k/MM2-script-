@@ -1,4 +1,4 @@
--- M2 Auto Farm v5 (Candy Collector)
+-- M2 Auto Farm v6 (Precision Collector)
 local Players = game:GetService("Players")
 local Workspace = game:GetService("Workspace")
 local VirtualInputManager = game:GetService("VirtualInputManager")
@@ -11,19 +11,22 @@ local Camera = Workspace.CurrentCamera
 
 -- CONFIGURAÇÕES
 local CONFIG = {
-    ClickSpeed = 0.15, -- Aumente para 0.2 se estiver lento
+    ClickSpeed = 0.2, -- Aumente para 0.3 se estiver lento
     Jitter = 0.05,
     -- Nomes que o script deve procurar nos objetos
-    TargetKeywords = {"candy", "resource", "node", "farm", "ore", "crystal", "gold", "silver", "copper", "iron", "coal"},
+    TargetKeywords = {"candy", "resource", "node", "farm", "ore", "crystal", "gold", "silver", "copper", "iron", "coal", "coin", "money", "cash"},
     -- Distância máxima para farmar
-    MaxDistance = 50,
+    MaxDistance = 60,
     -- Posição de farme (opcional)
     FarmPosition = nil, -- Ex: Vector3.new(100, 50, 200)
+    -- Tenta disparar Remote com diferentes parâmetros
+    TryRemoteFuzzing = true,
 }
 
 local State = {
     IsFarming = true,
     CurrentRemote = nil,
+    LastTarget = nil,
 }
 
 -- UI
@@ -52,7 +55,7 @@ local function CreateUI()
     Title.Size = UDim2.new(1, 0, 0, 30)
     Title.Position = UDim2.new(0, 0, 0, 0)
     Title.BackgroundTransparency = 1
-    Title.Text = "M2 Candy Farm"
+    Title.Text = "M2 Candy Farm v6"
     Title.TextColor3 = Color3.fromRGB(0, 255, 128)
     Title.TextScaled = true
     Title.Font = Enum.Font.GothamBold
@@ -153,12 +156,16 @@ local function ClickAtScreen(pos2D)
     end)
 end
 
--- Função de Aimbot
+-- Função de Aimbot (Trava a Câmera)
 local function AimAtPart(part)
     local targetPos = part.Position
     local cameraPos = Camera.CFrame.Position
     local lookAt = CFrame.lookAt(cameraPos, targetPos)
-    Camera.CFrame = CFrame.new(cameraPos) * lookAt
+    -- Interpolação suave para evitar "teleporte" da câmera
+    local currentCFrame = Camera.CFrame
+    local targetCFrame = CFrame.new(cameraPos) * lookAt
+    local lerpedCFrame = CFrame.Lerp(currentCFrame, targetCFrame, 0.5)
+    Camera.CFrame = lerpedCFrame
 end
 
 -- Função de Encontrar Alvo
@@ -190,14 +197,14 @@ local function FindTarget()
     return closestPart
 end
 
--- Função de Disparar Remote
+-- Função de Disparar Remote (Fuzzing)
 local function FireRemote(part)
     if not State.CurrentRemote then
         -- Procura por remotes comuns
         for _, obj in Workspace:GetDescendants() do
             if obj:IsA("RemoteEvent") or obj:IsA("RemoteFunction") then
                 local lowerName = obj.Name:lower()
-                if lowerName:find("collect") or lowerName:find("farm") or lowerName:find("interact") or lowerName:find("mine") then
+                if lowerName:find("collect") or lowerName:find("farm") or lowerName:find("interact") or lowerName:find("mine") or lowerName:find("pick") then
                     State.CurrentRemote = obj
                     print("[M2 Farm] Remote encontrado: " .. obj.Name)
                     break
@@ -207,13 +214,32 @@ local function FireRemote(part)
     end
 
     if State.CurrentRemote then
-        pcall(function()
-            if State.CurrentRemote:IsA("RemoteEvent") then
-                State.CurrentRemote:FireServer(part, part.Name)
-            elseif State.CurrentRemote:IsA("RemoteFunction") then
-                State.CurrentRemote:InvokeServer(part, part.Name)
-            end
-        end)
+        if CONFIG.TryRemoteFuzzing then
+            -- Tenta com diferentes parâmetros
+            pcall(function()
+                if State.CurrentRemote:IsA("RemoteEvent") then
+                    State.CurrentRemote:FireServer(part)
+                elseif State.CurrentRemote:IsA("RemoteFunction") then
+                    State.CurrentRemote:InvokeServer(part)
+                end
+            end)
+            
+            pcall(function()
+                if State.CurrentRemote:IsA("RemoteEvent") then
+                    State.CurrentRemote:FireServer(part.Name)
+                elseif State.CurrentRemote:IsA("RemoteFunction") then
+                    State.CurrentRemote:InvokeServer(part.Name)
+                end
+            end)
+        else
+            pcall(function()
+                if State.CurrentRemote:IsA("RemoteEvent") then
+                    State.CurrentRemote:FireServer(part)
+                elseif State.CurrentRemote:IsA("RemoteFunction") then
+                    State.CurrentRemote:InvokeServer(part)
+                end
+            end)
+        end
     end
 end
 
@@ -258,7 +284,12 @@ local function StartFarm()
                 -- Clica na posição exata do alvo na tela
                 local viewportPoint = Camera:WorldToViewportPoint(target.Position)
                 if viewportPoint.Z > 0 then
+                    -- Clica no centro
                     ClickAtScreen(Vector2.new(viewportPoint.X, viewportPoint.Y))
+                    
+                    -- Clica em pontos ligeiramente deslocados (para hitbox)
+                    ClickAtScreen(Vector2.new(viewportPoint.X + 5, viewportPoint.Y + 5))
+                    ClickAtScreen(Vector2.new(viewportPoint.X - 5, viewportPoint.Y - 5))
                 else
                     -- Fallback: Clique no centro da tela
                     ClickAtScreen(Vector2.new(960, 540))
