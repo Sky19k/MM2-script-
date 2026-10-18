@@ -1,4 +1,4 @@
--- M2 Auto Farm v4 (Corrigido)
+-- M2 Auto Farm v5 (Candy Collector)
 local Players = game:GetService("Players")
 local Workspace = game:GetService("Workspace")
 local VirtualInputManager = game:GetService("VirtualInputManager")
@@ -11,16 +11,19 @@ local Camera = Workspace.CurrentCamera
 
 -- CONFIGURAÇÕES
 local CONFIG = {
-    ClickSpeed = 0.1, -- Segundos entre cliques
-    Jitter = 0.05, -- Variabilidade para parecer humano
-    -- Posição de farme: Deixe nil para usar a posição atual do personagem
-    FarmPosition = nil, 
-    -- Se quiser forçar uma posição, descomente a linha abaixo e ajuste:
-    -- FarmPosition = Vector3.new(0, 50, 0),
+    ClickSpeed = 0.15, -- Aumente para 0.2 se estiver lento
+    Jitter = 0.05,
+    -- Nomes que o script deve procurar nos objetos
+    TargetKeywords = {"candy", "resource", "node", "farm", "ore", "crystal", "gold", "silver", "copper", "iron", "coal"},
+    -- Distância máxima para farmar
+    MaxDistance = 50,
+    -- Posição de farme (opcional)
+    FarmPosition = nil, -- Ex: Vector3.new(100, 50, 200)
 }
 
 local State = {
     IsFarming = true,
+    CurrentRemote = nil,
 }
 
 -- UI
@@ -34,8 +37,8 @@ local function CreateUI()
 
     local Main = Instance.new("Frame")
     Main.Name = "MainFrame"
-    Main.Size = UDim2.new(0, 280, 0, 150)
-    Main.Position = UDim2.new(1, -300, 0, 50)
+    Main.Size = UDim2.new(0, 300, 0, 180)
+    Main.Position = UDim2.new(1, -320, 0, 50)
     Main.BackgroundColor3 = Color3.fromRGB(20, 20, 20)
     Main.BorderSizePixel = 0
     Main.Parent = ScreenGui
@@ -49,7 +52,7 @@ local function CreateUI()
     Title.Size = UDim2.new(1, 0, 0, 30)
     Title.Position = UDim2.new(0, 0, 0, 0)
     Title.BackgroundTransparency = 1
-    Title.Text = "M2 Auto Farm"
+    Title.Text = "M2 Candy Farm"
     Title.TextColor3 = Color3.fromRGB(0, 255, 128)
     Title.TextScaled = true
     Title.Font = Enum.Font.GothamBold
@@ -60,7 +63,7 @@ local function CreateUI()
     Status.Size = UDim2.new(1, -20, 0, 20)
     Status.Position = UDim2.new(0.05, 0, 0.25, 0)
     Status.BackgroundTransparency = 1
-    Status.Text = "Status: Ativo"
+    Status.Text = "Status: Procurando alvo..."
     Status.TextColor3 = Color3.fromRGB(200, 200, 200)
     Status.TextScaled = true
     Status.Font = Enum.Font.Gotham
@@ -130,7 +133,7 @@ local function CreateUI()
             RootPart.CFrame = CFrame.new(CONFIG.FarmPosition)
             Status.Text = "Status: Teleportado"
         else
-            Status.Text = "Status: Use FarmPosition"
+            Status.Text = "Status: Defina FarmPosition"
         end
     end)
 
@@ -148,6 +151,70 @@ local function ClickAtScreen(pos2D)
         task.wait(0.05)
         VirtualInputManager:SendMouseButtonEvent(pos2D.X, pos2D.Y, 0, false)
     end)
+end
+
+-- Função de Aimbot
+local function AimAtPart(part)
+    local targetPos = part.Position
+    local cameraPos = Camera.CFrame.Position
+    local lookAt = CFrame.lookAt(cameraPos, targetPos)
+    Camera.CFrame = CFrame.new(cameraPos) * lookAt
+end
+
+-- Função de Encontrar Alvo
+local function FindTarget()
+    local closestPart = nil
+    local closestDist = math.huge
+
+    for _, part in Workspace:GetDescendants() do
+        if part:IsA("BasePart") and part ~= RootPart then
+            local lowerName = part.Name:lower()
+            local match = false
+            for _, keyword in CONFIG.TargetKeywords do
+                if lowerName:find(keyword) then
+                    match = true
+                    break
+                end
+            end
+
+            if match then
+                local dist = (RootPart.Position - part.Position).Magnitude
+                if dist < closestDist and dist < CONFIG.MaxDistance then
+                    closestDist = dist
+                    closestPart = part
+                end
+            end
+        end
+    end
+
+    return closestPart
+end
+
+-- Função de Disparar Remote
+local function FireRemote(part)
+    if not State.CurrentRemote then
+        -- Procura por remotes comuns
+        for _, obj in Workspace:GetDescendants() do
+            if obj:IsA("RemoteEvent") or obj:IsA("RemoteFunction") then
+                local lowerName = obj.Name:lower()
+                if lowerName:find("collect") or lowerName:find("farm") or lowerName:find("interact") or lowerName:find("mine") then
+                    State.CurrentRemote = obj
+                    print("[M2 Farm] Remote encontrado: " .. obj.Name)
+                    break
+                end
+            end
+        end
+    end
+
+    if State.CurrentRemote then
+        pcall(function()
+            if State.CurrentRemote:IsA("RemoteEvent") then
+                State.CurrentRemote:FireServer(part, part.Name)
+            elseif State.CurrentRemote:IsA("RemoteFunction") then
+                State.CurrentRemote:InvokeServer(part, part.Name)
+            end
+        end)
+    end
 end
 
 -- Loop Principal
@@ -172,22 +239,43 @@ local function StartFarm()
                 end
             end
 
-            -- Mira no Objeto Mais Próximo (ou no próprio personagem como fallback)
-            local targetPos = RootPart.Position + Vector3.new(0, 2, 0)
-            
-            -- Se tiver uma posição de farme configurada, usa ela
-            if CONFIG.FarmPosition then
-                targetPos = CONFIG.FarmPosition
+            -- Teleporte (se configurado)
+            if CONFIG.FarmPosition and (RootPart.Position - CONFIG.FarmPosition).Magnitude > 50 then
+                RootPart.CFrame = CFrame.new(CONFIG.FarmPosition)
+                task.wait(0.5)
             end
 
-            local viewportPoint = Camera:WorldToViewportPoint(targetPos)
-            
-            -- Se o ponto estiver na frente da câmera, clica
-            if viewportPoint.Z > 0 then
-                ClickAtScreen(Vector2.new(viewportPoint.X, viewportPoint.Y))
+            -- Encontra o alvo
+            local target = FindTarget()
+
+            if target then
+                -- Mira no alvo
+                AimAtPart(target)
+                
+                -- Dispara Remote (se existir)
+                FireRemote(target)
+
+                -- Clica na posição exata do alvo na tela
+                local viewportPoint = Camera:WorldToViewportPoint(target.Position)
+                if viewportPoint.Z > 0 then
+                    ClickAtScreen(Vector2.new(viewportPoint.X, viewportPoint.Y))
+                else
+                    -- Fallback: Clique no centro da tela
+                    ClickAtScreen(Vector2.new(960, 540))
+                end
+                
+                -- Atualiza status
+                local statusLabel = ScreenGui:FindFirstChild("MainFrame"):FindFirstChild("Status")
+                if statusLabel then
+                    statusLabel.Text = "Farmando: " .. target.Name
+                end
             else
-                -- Fallback: Clique no centro da tela
+                -- Se não achar alvo, clica no centro da tela
                 ClickAtScreen(Vector2.new(960, 540))
+                local statusLabel = ScreenGui:FindFirstChild("MainFrame"):FindFirstChild("Status")
+                if statusLabel then
+                    statusLabel.Text = "Status: Sem alvo próximo"
+                end
             end
 
             local jitter = (math.random() - 0.5) * CONFIG.Jitter
